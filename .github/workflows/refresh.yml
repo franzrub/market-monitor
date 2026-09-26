@@ -1,13 +1,25 @@
-name: refresh (test)
+name: refresh
 
-# TEST HARNESS — does NOT publish. The live site is still deployed by the QM cron.
-# Runs the same pipeline as QM (scripts/refresh.py, without run_all.sh's gh-pages step)
-# and uploads the built page as an artifact to compare with the live one.
+# Market Monitor auto-refresh — replaces the QM cron (2026-09-26).
+# Mon/Wed/Fri 20:30 UTC = 22:30 CEST (21:30 CET in winter), after the US close.
+# Scheduled runs fire from the default branch (main).
 on:
+  schedule:
+    - cron: "30 20 * * 1,3,5"
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Publish the page to gh-pages"
+        type: boolean
+        default: true
 
 permissions:
-  contents: read
+  contents: write   # commit state to main, push gh-pages
+  pages: write      # request a Pages build after the push
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
 
 jobs:
   refresh:
@@ -33,12 +45,41 @@ jobs:
           key: pdf-cache-${{ github.run_id }}
           restore-keys: pdf-cache-
 
-      - name: Refresh data and rebuild page (no deploy)
+      # refresh.py only (run_all.sh is QM's wrapper: it deploys with a PAT from .env.deploy)
+      - name: Refresh data and rebuild page
         run: python3 -u scripts/refresh.py
 
+      - name: Save state (data/*.json) to main
+        run: |
+          git config user.name "market-monitor-bot"
+          git config user.email "market-monitor-bot@users.noreply.github.com"
+          git add data/*.json
+          git diff --cached --quiet || git commit -q -m "refresh $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q origin HEAD:main
+
+      - name: Publish to gh-pages
+        if: ${{ github.event_name == 'schedule' || inputs.deploy }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -s app/index.html
+          d=$(mktemp -d)
+          cp app/index.html "$d/index.html"
+          touch "$d/.nojekyll"
+          cd "$d"
+          git init -q -b gh-pages
+          git config user.name "deploy"
+          git config user.email "deploy@localhost"
+          git add -A
+          git commit -q -m "deploy index.html"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" gh-pages
+          gh api -X POST "repos/${{ github.repository }}/pages/builds" --silent || true
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: market-monitor-build
           path: |
             app/index.html
             data/*.json
+          retention-days: 14

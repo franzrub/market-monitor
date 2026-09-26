@@ -96,11 +96,12 @@ Retry `publish` once the deployment runtime is enabled; the app dir is ready as-
 - New-report detection for 278-Ts: `data/trump_seen.json` (same scheme as `pelosi_seen.json`).
 - `refresh.py`: cache promotion now copies sub-directories (`data/cache/278t/`).
 
-## GitHub (2026-09-26)
-- Live site: `gh-pages`, deployed by the **QM cron** (QM on Fly: `run_all.sh` → `refresh.py`
-  → `deploy_ghpages.py`, token in `.env.deploy`, never committed). Owner wants it untouched.
-- `main` = QM's market-dash source (pushed by QM as branch `qm-source`, merged here) plus a
-  manual **test harness** workflow (`.github/workflows/refresh.yml`): runs `refresh.py` on
-  GitHub Actions, uploads the page as an artifact, **does not publish**.
-- Plan under evaluation: move the cron to GitHub Actions (free for public repos) and switch
-  QM off (~$20/mo). Only after the test output matches the live page.
+## GitHub Actions (since 2026-09-26) — this is now the live pipeline
+- `.github/workflows/refresh.yml` on `main` (default branch): Mon/Wed/Fri 20:30 UTC + manual.
+  Runs `scripts/refresh.py`, commits `data/*.json` back to `main`, force-pushes `index.html`
+  (+ `.nojekyll`) to `gh-pages` with the built-in `GITHUB_TOKEN`, then requests a Pages build.
+  Free: public repo. PDFs/OCR cache kept with `actions/cache` (not in git).
+- The previous runner was a **QM cron** on Fly (`run_all.sh` → `deploy_ghpages.py`, PAT in
+  `.env.deploy`, never committed). It must be disabled so the two don't both publish;
+  after that QM can stay off (`qm-off`). `run_all.sh` / `deploy_*.py` are kept only as history.
+- A manual run: Actions → refresh → Run workflow (untick "deploy" for a dry run).
