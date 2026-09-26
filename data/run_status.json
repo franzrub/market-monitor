@@ -1,0 +1,27 @@
+{
+ "run_at": "2026-09-26T15:11:18.329330+02:00",
+ "run_at_human": "2026-09-26 15:11 CEST",
+ "sources": {
+  "quotes": {
+   "ok": true,
+   "detail": "ok",
+   "age_hours": 0.006099289999999999,
+   "stale": false
+  },
+  "pelosi": {
+   "ok": true,
+   "detail": "ok",
+   "age_hours": 4.0074444444444446e-05,
+   "stale": false
+  },
+  "trump": {
+   "ok": true,
+   "detail": "ok",
+   "age_hours": 0.00011489111111111111,
+   "stale": false
+  }
+ },
+ "build_ok": true,
+ "build_error": "",
+ "any_failure": false
+}
