@@ -97,10 +97,10 @@ Retry `publish` once the deployment runtime is enabled; the app dir is ready as-
 - `refresh.py`: cache promotion now copies sub-directories (`data/cache/278t/`).
 
 ## GitHub (2026-09-26)
-- Source mirror on branch `main` of `franzrub/market-monitor`. The live page on `gh-pages` is
-  refreshed automatically by a SEPARATE job (not this folder) — the owner wants it left as is.
-  Nothing here publishes to `gh-pages`.
-- `.github/workflows/refresh.yml` is a manual-only test harness (no schedule, no deploy). It can
-  only be triggered if `main` becomes the default branch, which was deliberately NOT done.
-- The fixes above reach the live site only when they are ported into the job that builds it.
-- Locally: `pypdf` is not in the system python; use a venv (`pip install -r requirements.txt`).
+- Live site: `gh-pages`, deployed by the **QM cron** (QM on Fly: `run_all.sh` → `refresh.py`
+  → `deploy_ghpages.py`, token in `.env.deploy`, never committed). Owner wants it untouched.
+- `main` = QM's market-dash source (pushed by QM as branch `qm-source`, merged here) plus a
+  manual **test harness** workflow (`.github/workflows/refresh.yml`): runs `refresh.py` on
+  GitHub Actions, uploads the page as an artifact, **does not publish**.
+- Plan under evaluation: move the cron to GitHub Actions (free for public repos) and switch
+  QM off (~$20/mo). Only after the test output matches the live page.

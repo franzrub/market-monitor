@@ -13,6 +13,10 @@ FALLBACK_ANNUAL = {"url": "https://extapps2.oge.gov/201/Presiden.nsf/PAS+Index/6
                    "label": "Annual (2026)", "date": "2026-07-01"}
 T_LOOKBACK_DAYS = 365      # 278-T reports shown: filed within the last year...
 T_MAX_FILINGS = 8          # ...and at most this many
+OCR_BUDGET_S = int(os.environ.get("OCR_BUDGET_S", "780"))   # per-run OCR wall clock
+OCR_DPI = int(os.environ.get("OCR_DPI", "200"))            # native scan resolution
+OCR_PSM = os.environ.get("OCR_PSM", "4")                   # 278-T pages are wide tables
+_ocr_spent = [0.0]
 
 def _root():
     return os.environ.get("MARKET_DASH_ROOT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -48,20 +52,40 @@ def curl(url, dest, timeout=300):
 
 # ------------------------------------------------------------------ discovery
 def discover():
-    """All of Trump's filings from the OGE index: [{label, url, date}] newest first."""
-    r = subprocess.run(["curl", "-sS", "-L", "--max-time", "180", "-A", "Mozilla/5.0", OGE_API],
-                       capture_output=True)
-    if r.returncode != 0:
-        raise IOError(f"OGE index API unreachable: {r.stderr.decode()[-120:]}")
-    out = []
-    for row in json.loads(r.stdout).get("data", []):
-        if not row.get("name", "").lower().startswith("trump, donald"):
+    """All of Trump's filings from the OGE index: [{label, url, date}] newest first.
+    The index is a ~7 MB JSON document, so a short read can truncate it: retry, and
+    ignore anything in it that is not a well-formed row."""
+    last = ""
+    for attempt in range(3):
+        r = subprocess.run(["curl", "-sS", "-L", "--max-time", "300", "--retry", "2",
+                            "-A", "Mozilla/5.0", OGE_API], capture_output=True)
+        if r.returncode != 0:
+            last = f"curl exit {r.returncode}: {r.stderr.decode()[-120:]}"
             continue
-        m = re.search(r"href='([^']*)'>([^<]*)", row.get("type", ""))
-        if m and ".pdf" in m.group(1).lower():
-            out.append({"url": m.group(1), "label": m.group(2).strip(), "date": row.get("docDate", "")[:10]})
-    out.sort(key=lambda f: f["date"], reverse=True)
-    return out
+        try:
+            doc = json.loads(r.stdout)
+        except Exception as e:
+            last = f"malformed index ({len(r.stdout)} bytes): {type(e).__name__}"
+            continue
+        rows = doc.get("data") if isinstance(doc, dict) else doc
+        if not isinstance(rows, list) or not rows:
+            last = "index contained no rows"
+            continue
+        out = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if not str(row.get("name", "")).lower().startswith("trump, donald"):
+                continue
+            m = re.search(r"href='([^']*)'>([^<]*)", str(row.get("type", "")))
+            if m and ".pdf" in m.group(1).lower():
+                out.append({"url": m.group(1), "label": m.group(2).strip(),
+                            "date": str(row.get("docDate", ""))[:10]})
+        if out:
+            out.sort(key=lambda f: f["date"], reverse=True)
+            return out
+        last = "no Trump filings found in the index"
+    raise IOError(f"OGE index API unusable: {last}")
 
 # ------------------------------------------------------------------ 278-T
 T_RANGES = [(1001, 15000), (15001, 50000), (50001, 100000), (100001, 250000), (250001, 500000),
@@ -105,18 +129,49 @@ def text_layer(path):
     pages = [(p.extract_text() or "") for p in PdfReader(path).pages]
     return "\n".join(pages) if sum(len(p.strip()) for p in pages) > 50 * len(pages) else ""
 
+_TESS_ENV = {**os.environ, "OMP_THREAD_LIMIT": "1", "OMP_NUM_THREADS": "1"}
+
 def ocr(path):
+    """OCR a scanned filing. The text is cached beside the PDF and keyed by the PDF's
+    own bytes, so a filing is only ever OCR'd once; pages run in parallel."""
+    cache = path + ".ocr.txt"
+    stamp = hashlib.sha1(open(path, "rb").read()).hexdigest()
+    if os.path.exists(cache):
+        head, _, body = open(cache, encoding="utf-8", errors="replace").read().partition("\n")
+        if head == stamp:
+            return body
+    if _ocr_spent[0] >= OCR_BUDGET_S:
+        raise TimeoutError("OCR budget for this run is spent")
+    t0 = time.time()
     d = tempfile.mkdtemp(prefix="ocr-")
     try:
-        subprocess.run(["pdftoppm", "-r", "200", "-gray", "-png", path, os.path.join(d, "p")],
+        subprocess.run(["pdftoppm", "-r", str(OCR_DPI), "-gray", "-png", path, os.path.join(d, "p")],
                        check=True, capture_output=True, timeout=600)
-        out = []
-        for f in sorted(os.listdir(d)):
-            r = subprocess.run(["tesseract", os.path.join(d, f), "-", "--psm", "6"],
-                               capture_output=True, timeout=120)
-            out.append(r.stdout.decode(errors="replace"))
-        return "\n".join(out)
+        pages = [os.path.join(d, f) for f in sorted(os.listdir(d))]
+        workers = max(1, min(len(pages), (os.cpu_count() or 2)))
+        procs = [(p, subprocess.Popen(["tesseract", p, "-", "--psm", OCR_PSM],
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_TESS_ENV))
+                 for p in pages[:workers]]
+        queue, out = pages[workers:], {}
+        while procs:
+            p, pr = procs.pop(0)
+            try:
+                so, _ = pr.communicate(timeout=180)
+            except subprocess.TimeoutExpired:
+                pr.kill(); so = b""
+            out[p] = so.decode(errors="replace")
+            if queue:
+                nxt = queue.pop(0)
+                procs.append((nxt, subprocess.Popen(["tesseract", nxt, "-", "--psm", OCR_PSM],
+                                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_TESS_ENV)))
+        text = "\n".join(out[p] for p in pages)
+        try:
+            open(cache, "w", encoding="utf-8").write(stamp + "\n" + text)
+        except Exception:
+            pass
+        return text
     finally:
+        _ocr_spent[0] += time.time() - t0
         shutil.rmtree(d, ignore_errors=True)
 
 def parse_278t(text):
@@ -158,7 +213,14 @@ def transactions(filings, annual_date):
             rows = parse_278t(text) if text else []
             # the embedded OCR layer of some filings is garbage: re-OCR when coverage is poor
             if coverage(rows) < 0.5 and have_ocr():
-                o_rows = parse_278t(ocr(path))
+                try:
+                    o_rows = parse_278t(ocr(path))
+                except TimeoutError:
+                    out.append({**entry, "ok": False, "method": "OCR deferred",
+                                "error": "scanned filing, OCR deferred to the next run",
+                                "rows": []})
+                    print(f"  278-T {f['date']} {entry['name'][:48]:48} OCR deferred (budget spent)")
+                    continue
                 if len(o_rows) > len(rows):
                     text, rows, method = "x", o_rows, "tesseract OCR"
             if not text and not rows:

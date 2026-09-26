@@ -1,26 +1,20 @@
-name: refresh
+name: refresh (test)
 
-# Manual test harness only. The live site (gh-pages) is refreshed by a separate job and
-# must NOT be touched from here: no schedule, no publish step.
-# Note: workflow_dispatch works only once this file is on the repository's default branch.
+# TEST HARNESS — does NOT publish. The live site is still deployed by the QM cron.
+# Runs the same pipeline as QM (scripts/refresh.py, without run_all.sh's gh-pages step)
+# and uploads the built page as an artifact to compare with the live one.
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: refresh
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -32,20 +26,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq tesseract-ocr poppler-utils
 
-      # 278e annual + 278-T PDFs: ~80 MB, too big for git; keep them between runs
+      # 278e annual + 278-T PDFs and their OCR text: too big for git, kept between runs
       - uses: actions/cache@v4
         with:
           path: data/cache
           key: pdf-cache-${{ github.run_id }}
           restore-keys: pdf-cache-
 
-      - name: Refresh data and rebuild page
-        run: ./run_all.sh
+      - name: Refresh data and rebuild page (no deploy)
+        run: python3 -u scripts/refresh.py
 
-      - name: Save state (data/*.json + page) back to main
-        run: |
-          git config user.name "market-monitor-bot"
-          git config user.email "market-monitor-bot@users.noreply.github.com"
-          git add data/*.json app/index.html
-          git diff --cached --quiet || git commit -m "refresh $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push origin main
+      - uses: actions/upload-artifact@v4
+        with:
+          name: market-monitor-build
+          path: |
+            app/index.html
+            data/*.json

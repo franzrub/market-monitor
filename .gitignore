@@ -1,5 +1,8 @@
 data/cache/
 logs/
-app/index.html.new
+app/
+.env*
+.last_deploy_hash
+*.bak*
 __pycache__/
 .DS_Store
