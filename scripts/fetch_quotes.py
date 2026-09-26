@@ -29,7 +29,8 @@ WATCH = [("BRK-B", "Berkshire Hathaway Inc. Class B", "BRK.B"), ("GOOGL", "Alpha
          ("TEM", "Tempus AI, Inc.", None), ("LLY", "Eli Lilly and Company", None),
          ("TXN", "Texas Instruments Incorporated", None), ("INTC", "Intel Corporation", None),
          ("MU", "Micron Technology, Inc.", None), ("USAR", "USA Rare Earth, Inc.", None),
-         ("UBER", "Uber Technologies, Inc.", None), ("IBM", "International Business Machines", None)]
+         ("UBER", "Uber Technologies, Inc.", None), ("IBM", "International Business Machines", None),
+         ("SNDK", "SanDisk Corp.", None)]
 
 def yahoo(symbol):
     last_err = None

@@ -21,7 +21,7 @@ SOURCES = [
      lambda d: bool(d.get("indices")) and bool(d.get("watchlist"))),
     ("pelosi", "fetch_pelosi.py", "pelosi.json", 420,
      lambda d: bool(d.get("ok")) and bool(d.get("rows"))),
-    ("trump",  "fetch_trump.py",  "trump.json",  600,
+    ("trump",  "fetch_trump.py",  "trump.json",  1500,
      lambda d: bool(d.get("ok")) and bool(d.get("top_holdings"))),
 ]
 

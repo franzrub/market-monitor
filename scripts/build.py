@@ -14,7 +14,7 @@ except Exception:
     STATUS = {}
 
 WATCH_TICKERS = {"BRK.B", "BRK-B", "GOOGL", "NVDA", "PANW", "AMZN", "AVGO", "VST", "AXON",
-                 "TEM", "LLY", "TXN", "INTC", "MU", "USAR", "UBER", "IBM"}
+                 "TEM", "LLY", "TXN", "INTC", "MU", "USAR", "UBER", "IBM", "SNDK"}
 ACR = {"Etf": "ETF", "Inc": "Inc.", "Llc": "LLC", "Lp": "LP", "Us": "U.S.", "Spdr": "SPDR",
        "S&p": "S&P", "Nvidia": "NVIDIA", "Ibm": "IBM", "Reit": "REIT", "Corp": "Corp.", "Tr": "Trust"}
 
@@ -23,10 +23,6 @@ def load(name):
         return json.load(open(os.path.join(ROOT, "data", name)))
     except Exception:
         return None
-
-def pkey(r):
-    """Identity of a Pelosi transaction; ticker-less assets (LLCs, funds) fall back to the name."""
-    return "|".join(str(r.get(k) or (r.get("asset", "") if k == "ticker" else "")) for k in ("date", "ticker", "type", "amount"))
 
 # issuer-name fragments used to spot watchlist names inside OGE free-text descriptions
 WATCH_NAMES = {"NVDA": "NVIDIA", "AVGO": "BROADCOM", "GOOGL": "ALPHABET", "AMZN": "AMAZON",
@@ -51,10 +47,12 @@ def fmt(v, cur="", idx=False):
 def cls_of(v, eps=0.0005):
     return "up" if v is not None and v > eps else ("down" if v is not None and v < -eps else "flat")
 
-def pct(v, small=False):
+def pct(v, small=False, neutral=False):
     if v is None: return '<span class="muted">n/a</span>'
     c = cls_of(v)
     a = "▲" if c == "up" else ("▼" if c == "down" else "▬")
+    if neutral and abs(v) < 2: return f'<span class="chg flat sm"><span class="arw">▬</span>{v:+.2f}%</span>'
+    if neutral and abs(v) >= 2: return f'<span class="chg {c} sm"><span class="arw">{"▲" if c=="up" else "▼"}</span>{v:+.2f}%</span>'
     return f'<span class="chg {c}{" sm" if small else ""}"><span class="arw">{a}</span>{v:+.2f}%</span>'
 
 def spark(vals, w=86, h=22):
@@ -78,7 +76,7 @@ def range_tag(pos):
     if pos is None: return ""
     if pos >= 80: return '<span class="rtag hi">near high</span>'
     if pos <= 20: return '<span class="rtag lo">near low</span>'
-    return '<span class="rtag mid">mid-range</span>'
+    return ""
 
 def zfmt(w):
     z = w.get("z")
@@ -95,6 +93,172 @@ def rvfmt(w):
 
 def unusual(w):
     return (w.get("z") is not None and abs(w["z"]) >= 2) or (w.get("rvol") is not None and w["rvol"] >= 2)
+
+def trend_align(w):
+    d, w5, m1 = w.get("chg_pct"), w.get("week_pct"), w.get("month_pct")
+    if d is None or w5 is None or m1 is None: return 0
+    if d > 0 and w5 > 0 and m1 > 0: return 1
+    if d < 0 and w5 < 0 and m1 < 0: return -1
+    return 0
+
+def stretched(w):
+    z = w.get("z"); rv = w.get("rvol")
+    if z is None or abs(z) < 2: return False
+    return rv is None or rv < 1.5
+
+def classify(w):
+    unu = unusual(w); strc = stretched(w); ta = trend_align(w)
+    fh = w.get("from_high_pct"); fl = w.get("from_low_pct")
+    nh = w.get("new_52w_high"); nl = w.get("new_52w_low")
+    if unu:
+        if strc:
+            return ('<span class="badge stretch">' + chr(8764) + ' Stretched (vol<1.5' + chr(215) + ')</span>', "str")
+        z, rv = w.get("z"), w.get("rvol")
+        label = ""
+        if z and abs(z) >= 2 and rv and rv >= 2:
+            label = f'{z:+.1f}' + chr(963) + f' {rv:.1f}' + chr(215)
+        elif z and abs(z) >= 2:
+            label = f'{z:+.1f}' + chr(963)
+        elif rv and rv >= 2:
+            label = f'{rv:.1f}' + chr(215)
+        return (f'<span class="badge unu">' + chr(9889) + f' Unusual<span class="mini">{label}</span></span>', "unu")
+    if ta == 1:
+        return ('<span class="badge trend-up">' + chr(9654) + ' In force (Day/5d/1M ' + chr(8593) + ')</span>', "upforce")
+    if ta == -1:
+        return ('<span class="badge trend-dn">' + chr(9660) + ' Pressure (Day/5d/1M ' + chr(8595) + ')</span>', "dnpress")
+    if fh is not None and fh >= -3:
+        return ('<span class="badge hi">' + chr(9670) + ' Near high (>= -3% from 52w high)</span>', "nearhi")
+    if fl is not None and fl <= 3:
+        return ('<span class="badge lo">' + chr(9671) + ' Near low (<= 3% from 52w low)</span>', "nearlo")
+    if nh:
+        return ('<span class="badge hi">new 52w high</span>', "newhi")
+    if nl:
+        return ('<span class="badge lo">new 52w low</span>', "newlo")
+    return ("", "")
+
+def setup_badges(w, in_pelosi=False):
+    badge, _ = classify(w)
+    if badge:
+        return badge
+    if in_pelosi:
+        return '<span class="badge pel">' + chr(9733) + ' Insider</span>'
+    return ""
+
+def setup_tags(w):
+    _, tag = classify(w)
+    if not tag and w.get("verified") is False:
+        tag = "verify"
+    return tag
+
+def build_setups(q):
+    if not q or not q.get("watchlist"): return ""
+    g = {"unu":[],"str":[],"upforce":[],"dnpress":[],"nearhi":[],"nearlo":[],"newhi":[]}
+    for w in q["watchlist"]:
+        _, tag = classify(w)
+        if tag and tag in g:
+            g[tag].append(w["requested"])
+    parts = []
+    if g["unu"]:
+        parts.append('<span class="set-chip set-str"><span class="set-dot" style="background:#c98a00"></span><b>Unusual</b> ' + chr(9889) + ' ' + ", ".join(esc(t) for t in g["unu"][:5]) + '</span>')
+    if g["str"]:
+        parts.append('<span class="set-chip set-str"><span class="set-dot" style="background:#c98a00"></span><b>Stretched</b> ' + ", ".join(esc(t) for t in g["str"][:5]) + '</span>')
+    if g["upforce"]:
+        parts.append('<span class="set-chip set-force"><span class="set-dot" style="background:var(--up)"></span><b>In force</b> ' + ", ".join(esc(t) for t in g["upforce"][:5]) + '</span>')
+    if g["dnpress"]:
+        parts.append('<span class="set-chip set-press"><span class="set-dot" style="background:var(--down)"></span><b>Under pressure</b> ' + ", ".join(esc(t) for t in g["dnpress"][:5]) + '</span>')
+    if g["nearhi"]:
+        parts.append('<span class="set-chip set-hi"><span class="set-dot" style="background:var(--up)"></span><b>Near high</b> ' + ", ".join(esc(t) for t in g["nearhi"][:5]) + '</span>')
+    if g["nearlo"]:
+        parts.append('<span class="set-chip set-lo"><span class="set-dot" style="background:var(--down)"></span><b>Near low</b> ' + ", ".join(esc(t) for t in g["nearlo"][:5]) + '</span>')
+    if g["newhi"]:
+        parts.append('<span class="set-chip set-hi"><span class="set-dot" style="background:var(--up)"></span><b>New highs</b> ' + ", ".join(esc(t) for t in g["newhi"][:5]) + '</span>')
+    if not parts:
+        return ""
+    return '<div class="setups">' + "".join(parts) + '</div>'
+
+def _load_prev():
+    try: return json.load(open(os.path.join(ROOT, "data", "prev_state.json")))
+    except: return None
+
+def _prev_exists():
+    return os.path.exists(os.path.join(ROOT, "data", "prev_state.json"))
+
+def _rkey(r):
+    """Identity of a disclosure row; ticker-less assets fall back to the name."""
+    return "|".join(str(r.get(k) or (r.get("asset", "") if k == "ticker" else ""))
+                    for k in ("date", "ticker", "type", "amount"))
+
+def build_delta(q, p, prev, tr=None):
+    if not q or not q.get("watchlist"): return ""
+    wl = q["watchlist"]
+    nu = {w["requested"] for w in wl if unusual(w)}
+    nh = {w["requested"] for w in wl if w.get("new_52w_high")}
+    nl = {w["requested"] for w in wl if w.get("new_52w_low")}
+    nf = {w["requested"] for w in wl if trend_align(w) == 1}
+    np = {w["requested"] for w in wl if trend_align(w) == -1}
+    
+    pu, ph, pl, pf, pp = set(), set(), set(), set(), set()
+    if prev and "watchlist" in prev:
+        for w in prev["watchlist"]:
+            t = w["requested"]; z = w.get("z"); rv = w.get("rvol")
+            if (z is not None and abs(z) >= 2) or (rv is not None and rv >= 2): pu.add(t)
+            if w.get("new_52w_high"): ph.add(t)
+            if w.get("new_52w_low"): pl.add(t)
+            d, w5, m1 = w.get("chg_pct"), w.get("week_pct"), w.get("month_pct")
+            if d is not None and w5 is not None and m1 is not None:
+                if d > 0 and w5 > 0 and m1 > 0: pf.add(t)
+                if d < 0 and w5 < 0 and m1 < 0: pp.add(t)
+    
+    bullets = []
+    nn = nu - pu
+    if nn:
+        dts = []
+        for t in sorted(nn):
+            w = next((x for x in wl if x["requested"]==t), None)
+            if w: dts.append(f'<b>{esc(t)}</b> {w.get("chg_pct",0):+.2f}% ({w.get("z",0):+.1f}\u03c3)')
+        bullets.append(("unu", f"New unusual moves ({len(nn)})", " \u00b7 ".join(dts)))
+    ex = pu - nu
+    if ex: bullets.append(("quiet", "Returned to normal", ", ".join(sorted(ex))))
+    nhh = nh - ph; nll = nl - pl
+    if nhh or nll:
+        parts = []
+        if nhh: parts.append("new highs: " + ", ".join(sorted(nhh)))
+        if nll: parts.append("new lows: " + ", ".join(sorted(nll)))
+        bullets.append(("flag", "52-week extremes", "; ".join(parts)))
+    nff = (nf - pf) - nu
+    if nff: bullets.append(("up", "Entered uptrend", ", ".join(sorted(nff))))
+    npp = (np - pp) - nu
+    if npp: bullets.append(("down", "Entered downtrend", ", ".join(sorted(npp))))
+    if p and p.get("new_keys"):
+        nk = set(p.get("new_keys") or [])
+        fr = [r for r in p.get("rows",[]) if _rkey(r) in nk]
+        if fr:
+            txt = " \u00b7 ".join(
+                f'<b>{esc(r["ticker"])}</b> {esc(r["type"])} {esc(r["amount"])}'
+                + (" \u2605" if (r.get("ticker") or "").upper() in WATCH_TICKERS else "")
+                for r in fr[:4])
+            bullets.append(("new", f"New Pelosi disclosure{'s' if len(fr)>1 else ''}", txt))
+    if tr and tr.get("new_reports"):
+        nrep = [x for x in (tr.get("transaction_reports") or []) if x["url"] in set(tr["new_reports"])]
+        if nrep:
+            bullets.append(("new", f"New Trump 278-T report{'s' if len(nrep)>1 else ''} ({len(nrep)})",
+                            " \u00b7 ".join(esc(x["filed"]) for x in nrep[:4])))
+    if not bullets:
+        return '<div class="delta-quiet">\u25c6 No material changes since last run.</div>'
+    items = "".join(f'<li class="b-{c}"><span class="bl">{t}</span><span class="bd">{d}</span></li>'
+                    for c,t,d in bullets)
+    return f'<div class="delta-strip"><h3>\u25b6 Since last run</h3><ul>{items}</ul></div>'
+
+def save_prev_state(q, p, tr):
+    if not q or not q.get("watchlist"): return
+    snap = {"watchlist": [],
+            "pelosi_keys": list({_rkey(r) for r in p.get("rows",[])}) if p and p.get("rows") else [],
+            "trump_annual": (tr.get("source_url"), tr.get("annual_date")) if tr else None}
+    for w in q["watchlist"]:
+        snap["watchlist"].append({k: w[k] for k in ("requested","z","rvol","chg_pct",
+            "week_pct","month_pct","from_high_pct","from_low_pct","new_52w_high","new_52w_low")
+            if k in w and w[k] is not None})
+    json.dump(snap, open(os.path.join(ROOT, "data", "prev_state.json"), "w"))
 
 def rangebar(w):
     pos, hi, lo = w.get("range_pos"), w.get("wk52_high"), w.get("wk52_low")
@@ -120,15 +284,16 @@ def unavailable(msg):
     return f'<div class="unavail"><strong>Data unavailable</strong><span>{esc(msg)}</span></div>'
 
 # ------------------------------------------------------------------ today strip
-def build_today(q, p, tr=None):
+def build_today(q, p, macro):
     if not q or not (q.get("watchlist") or q.get("indices")):
         return ('<div class="hero"><div class="hero-h">Today</div>'
                 + unavailable("No market data on this run — see the stale notes below.") + "</div>")
     movers = [dict(m, _n=m.get("label") or m.get("requested")) for m in q.get("indices", [])] + \
              [dict(m, _n=m.get("requested")) for m in q.get("watchlist", [])]
     movers = [m for m in movers if m.get("chg_pct") is not None]
-    ups = sorted([m for m in movers if m["chg_pct"] > 0], key=lambda m: -m["chg_pct"])[:3]
-    dns = sorted([m for m in movers if m["chg_pct"] < 0], key=lambda m: m["chg_pct"])[:3]
+    unu_tickers = {w["requested"] for w in q.get("watchlist",[]) if unusual(w)}
+    ups = sorted([m for m in movers if m["chg_pct"] > 0 and m.get("requested",m.get("symbol")) not in unu_tickers and m.get("_n") not in unu_tickers], key=lambda m: -m["chg_pct"])[:3]
+    dns = sorted([m for m in movers if m["chg_pct"] < 0 and m.get("requested",m.get("symbol")) not in unu_tickers and m.get("_n") not in unu_tickers], key=lambda m: m["chg_pct"])[:3]
     wl = q.get("watchlist", [])
     macro = {m["symbol"]: m for m in q.get("macro", [])}
     bullets = []
@@ -148,15 +313,14 @@ def build_today(q, p, tr=None):
 
     biggest = max((abs(m["chg_pct"]) for m in movers), default=0)
     if biggest < 0.75:
-        bullets.append(("quiet", "Quiet session", "Nothing moved more than "
-                        f"{biggest:.2f}% across the indices or the watchlist."))
+        quiet_line = f'<div class="quiet-hero">Quiet session — nothing moved more than {biggest:.2f}%. Check the tables below.</div>'
     else:
         if ups:
             bullets.append(("up", "Leading today", " · ".join(
-                f'<b>{esc(m["_n"])}</b> {m["chg_pct"]:+.2f}%' for m in ups)))
+                f'<b>{esc(m["_n"])}</b> {m["chg_pct"]:+.2f}% <span class="mini">(${abs(m["last"] - m["prev_close"]):,.2f})</span>' for m in ups)))
         if dns:
             bullets.append(("down", "Lagging today", " · ".join(
-                f'<b>{esc(m["_n"])}</b> {m["chg_pct"]:+.2f}%' for m in dns)))
+                f'<b>{esc(m["_n"])}</b> {m["chg_pct"]:+.2f}% <span class="mini">(${abs(m["last"] - m["prev_close"]):,.2f})</span>' for m in dns)))
 
     nh = [w for w in wl if w.get("new_52w_high")]
     nl = [w for w in wl if w.get("new_52w_low")]
@@ -177,6 +341,7 @@ def build_today(q, p, tr=None):
             f'{esc(w["requested"])} ({w["from_low_pct"]:+.1f}%)' for w in sorted(near_l, key=lambda w: w["from_low_pct"])))
         bullets.append(("near", "Pressing the range", "; ".join(parts)))
 
+    regime_bar = ""
     vix, tnx, eur, btc = (macro.get(k) for k in ("^VIX", "^TNX", "EURUSD=X", "BTC-USD"))
     if vix or tnx:
         score = 0
@@ -185,56 +350,48 @@ def build_today(q, p, tr=None):
             score += 1 if vix["chg_pct"] < -3 else (-1 if vix["chg_pct"] > 5 else 0)
         if btc: score += 1 if btc["chg_pct"] > 1 else (-1 if btc["chg_pct"] < -1 else 0)
         spx = next((i for i in q.get("indices", []) if i["symbol"] == "^GSPC"), None)
-        _ = spx
         if spx: score += 1 if spx["chg_pct"] > 0.3 else (-1 if spx["chg_pct"] < -0.3 else 0)
         read = "risk-on" if score >= 2 else ("risk-off" if score <= -2 else "mixed")
-        # one line of reasoning — the four levels already sit in the strip above,
-        # so name the drivers rather than reprinting them.
+        status_color = "var(--up)" if read == "risk-on" else ("var(--down)" if read == "risk-off" else "var(--mut)")
         why = []
         if vix:
             lvl = "subdued" if vix["last"] < 16 else ("elevated" if vix["last"] > 22 else "middling")
             mv = "falling" if vix["chg_pct"] < -3 else ("spiking" if vix["chg_pct"] > 5 else "steady")
-            why.append(f"volatility {lvl} and {mv}")
+            why.append(f"vol {lvl}, {mv}")
         if spx and spx.get("chg_pct") is not None:
-            why.append("the S&P closed " + ("higher" if spx["chg_pct"] > 0.3 else
-                                            "lower" if spx["chg_pct"] < -0.3 else "flat"))
-        if btc: why.append("crypto " + ("bid" if btc["chg_pct"] > 1 else
-                                        "under pressure" if btc["chg_pct"] < -1 else "quiet"))
+            why.append("S&P " + ("higher" if spx["chg_pct"] > 0.3 else "lower" if spx["chg_pct"] < -0.3 else "flat"))
         if tnx and tnx.get("prev_close"):
             bp = (tnx["last"] - tnx["prev_close"]) * 100
-            why.append("yields " + ("higher" if bp > 2 else "lower" if bp < -2 else "little changed"))
-        reason = ", ".join(why[:3]) or "mixed macro signals"
-        bullets.append(("regime-" + read.replace("-", ""), f"Risk regime: {read}",
-                        reason[0].upper() + reason[1:] + "."))
+            why.append("yields " + ("higher" if bp > 2 else "lower" if bp < -2 else "flat"))
+        regime_bar = (f'<div class="regime-bar"><span class="regime-dot" style="background:{status_color}"></span>'
+                      f'<strong>{read.replace("-"," ").title()}</strong>'
+                      f'<span class="regime-why"> — {", ".join(why[:2])}</span></div>')
 
     if p and p.get("ok"):
         newk = set(p.get("new_keys") or [])
         rows = p.get("rows", [])
-        fresh = [r for r in rows if pkey(r) in newk]
+        def key(r): return "|".join(str(r.get(k, "")) for k in ("date", "ticker", "type", "amount"))
+        fresh = [r for r in rows if key(r) in newk]
         if fresh:
             ov = [r for r in fresh if (r.get("ticker") or "").upper() in WATCH_TICKERS]
-            txt = " · ".join(f'<b>{esc(r.get("ticker") or r.get("asset", "")[:24])}</b> {esc(r["type"])} {esc(r["amount"])}'
+            txt = " · ".join(f'<b>{esc(r["ticker"])}</b> {esc(r["type"])} {esc(r["amount"])}'
                              + (" ★" if (r.get("ticker") or "").upper() in WATCH_TICKERS else "")
                              for r in fresh[:4])
             bullets.append(("new", f"New Pelosi disclosure{'s' if len(fresh) > 1 else ''}"
                             + (f" — {len(ov)} on your watchlist" if ov else ""), txt))
         else:
-            bullets.append(("quiet", "No new Pelosi filings", "Nothing disclosed since the previous run."))
-
-    newt = [x for x in (tr or {}).get("transaction_reports", []) if x["url"] in set((tr or {}).get("new_reports") or [])]
-    if newt:
-        hits = sorted({watch_hit(r["description"]) for x in newt for r in x["rows"]} - {None})
-        bullets.append(("new", f"New Trump transaction report{'s' if len(newt) > 1 else ''} (278-T)"
-                        + (f" — touches {', '.join(hits)} ★" if hits else ""),
-                        " · ".join(f'filed {esc(x["filed"])}: {x.get("buys", 0)} buys, {x.get("sells", 0)} sells'
-                                   if x["ok"] else f'filed {esc(x["filed"])}: not machine-readable' for x in newt[:3])))
+            pass
 
     bullets = bullets[:8]
     items = "".join(
         f'<li class="b-{c}"><span class="bl">{esc(t) if "<" not in t else t}</span>'
         f'<span class="bd">{d}</span></li>' for c, t, d in bullets)
+    quiet_line = locals().get("quiet_line", "")
     return (f'<div class="hero"><div class="hero-h">Today <span>— what to look at first</span></div>'
-            f'<ul class="bullets">{items}</ul></div>')
+            + (regime_bar if regime_bar else "")
+            + (quiet_line if quiet_line else "")
+            + (f'<ul class="bullets">{items}</ul>' if items else "")
+            + '</div>')
 
 # ------------------------------------------------------------------ sections
 def macro_strip(q):
@@ -250,8 +407,15 @@ def macro_strip(q):
         else:
             c = cls_of(m.get("chg_pct")); delta = f'{m["chg_pct"]:+.2f}%'
         a = "▲" if c == "up" else ("▼" if c == "down" else "▬")
+        # Percentile badge for VIX and TNX
+        pctl_str = None
+        if m["symbol"] == "^VIX":
+            pctl_str = _pctile_str(m["last"], "vix")
+        elif m["symbol"] == "^TNX":
+            pctl_str = _pctile_str(m["last"], "tnx")
+        pctl_tag = f'<span class="pctl">{esc(pctl_str)}</span>' if pctl_str else ""
         chips += (f'<div class="chip"><span class="cl">{esc(m["label"])}</span>'
-                  f'<span class="cv">{v}</span>'
+                  f'<span class="cv">{v}{pctl_tag}</span>'
                   f'<span class="cc {c}">{a}{delta}</span></div>')
     return f'<div class="macro">{chips}</div>'
 
@@ -263,10 +427,10 @@ def sec_indices(q):
         emph = "pop" if abs(i.get("chg_pct") or 0) >= 3 else ("calm" if abs(i.get("chg_pct") or 0) < 0.5 else "")
         rows += (f'<tr class="{emph}"><td class="tk"><span class="sym">{esc(i["label"])}</span>'
                  f'<span class="sub">{esc(i["symbol"])}</span></td>'
-                 f'<td class="n mono">{i["last"]:,.0f}</td>'
-                 f'<td class="n">{pct(i.get("chg_pct"))}</td>'
-                 f'<td class="n">{pct(i.get("week_pct"), True)}</td>'
-                 f'<td class="n">{pct(i.get("month_pct"), True)}</td></tr>')
+                 f'<td class="n mono" data-label="Close">{i["last"]:,.0f}</td>'
+                 f'<td class="n" data-label="Day">{pct(i.get("chg_pct"))}</td>'
+                 f'<td class="n" data-label="5d">{pct(i.get("week_pct"), True, True)}</td>'
+                 f'<td class="n" data-label="1M">{pct(i.get("month_pct"), True, True)}</td></tr>')
     miss = "".join(f'<p class="note warn">⚠ {esc(e["label"])} ({esc(e["symbol"])}) could not be retrieved.</p>'
                    for e in q.get("errors", []) if e.get("label"))
     return (f'<div class="tw"><table><thead><tr><th>Index</th><th class="n">Close</th>'
@@ -292,24 +456,52 @@ def sec_watch(q, pel):
             emph = "calm"
         else:
             emph = ""
-        flags = '<span class="badge unu">⚡ unusual</span>' if unu else ""
-        if w.get("new_52w_high"): flags += '<span class="badge hi">new 52w high</span>'
-        if w.get("new_52w_low"): flags += '<span class="badge lo">new 52w low</span>'
-        if w["requested"].upper() in pel_t: flags += '<span class="badge pel">★ Pelosi</span>'
-        if not w.get("verified"): flags += '<span class="badge warn">verify</span>'
-        rows += (f'<tr class="{emph}"><td class="tk"><span class="sym">{esc(w["requested"])}</span>'
+        in_pel = w["requested"].upper() in pel_t
+        flags = setup_badges(w, in_pel)
+        if not flags:
+            if w.get("verified") is False: flags += '<span class="badge warn">verify</span>'
+        st = setup_tags(w)
+        rows += (f'<tr class="{emph}" data-setup="{st}"><td class="tk"><span class="sym">{esc(w["requested"])}</span>'
                  f'<span class="sub">{esc(w.get("name") or "")}{flags}</span></td>'
-                 f'<td class="n mono">{fmt(w["last"], w.get("currency"))}</td>'
-                 f'<td class="n">{pct(w.get("chg_pct"))}</td>'
-                 f'<td class="n">{pct(w.get("week_pct"), True)}</td>'
-                 f'<td class="n">{pct(w.get("month_pct"), True)}</td>'
-                 f'<td class="n">{zfmt(w)}</td>'
-                 f'<td class="n">{rvfmt(w)}</td>'
-                 f'<td class="n spkc">{spark(w.get("spark"))}</td>'
-                 f'<td class="rbc">{rangebar(w)}</td></tr>')
+                 f'<td class="n mono" data-label="Last">{fmt(w["last"], w.get("currency"))}</td>'
+                 f'<td class="n" data-label="Day">{pct(w.get("chg_pct"))}</td>'
+                 f'<td class="n" data-label="5d">{pct(w.get("week_pct"), True, True)}</td>'
+                 f'<td class="n" data-label="1M">{pct(w.get("month_pct"), True, True)}</td>'
+                 f'<td class="n" data-label="z">{zfmt(w)}</td>'
+                 f'<td class="n" data-label="Vol">{rvfmt(w)}</td>'
+                 f'<td class="n spkc" data-label="30d">{spark(w.get("spark"))}</td>'
+                 f'<td class="rbc" data-label="Range">{rangebar(w)}</td></tr>')
     miss = "".join(f'<p class="note warn">⚠ <strong>{esc(e["symbol"])}</strong> did not resolve — no data returned.</p>'
                    for e in q.get("errors", []) if not e.get("label"))
-    return (f'<div class="tw"><table><thead><tr><th>Ticker</th><th class="n">Last</th>'
+    toolbar = ('<div class="wl-toolbar">'
+            '<select class="wl-filter" onchange="var f=this.value;'
+            '[].forEach.call(document.querySelectorAll(\'.tw table tbody tr\'),'
+            'function(r){if(!f||r.getAttribute(\'data-setup\').indexOf(f)>=0)'
+            'r.style.display=\'\';else r.style.display=\'none\'})\">'
+            '<option value=\'\'>All</option>'
+            '<option value=\'unu\'>\u26a1 Unusual</option>'
+            '<option value=\'upforce\'>\u25b2 In force</option>'
+            '<option value=\'dnpress\'>\u25bc Under pressure</option>'
+            '<option value=\'str\'>\u223c Stretched</option>'
+            '<option value=\'nearhi\'>\u25c6 Near high</option>'
+            '<option value=\'nearlo\'>\u25c7 Near low</option>'
+            '</select>'
+            '<select class="wl-mobile-sort" onchange="var c=this.value.split(\',\');'
+            'var tbl=this.closest(\'section\').querySelector(\'table\');'
+            'if(tbl&&tbl.querySelector(\'th:nth-child(\'+c[0]+\')\'))'
+            'tbl.querySelector(\'th:nth-child(\'+c[0]+\')\').click()\">'
+            '<option value=\'\'>Sort\u2026</option>'
+            '<option value=\'0,asc\'>T \u2191</option>'
+            '<option value=\'0,desc\'>T \u2193</option>'
+            '<option value=\'1,asc\'>\$ \u2191</option>'
+            '<option value=\'1,desc\'>\$ \u2193</option>'
+            '<option value=\'2,asc\'>Day \u2191</option>'
+            '<option value=\'2,desc\'>Day \u2193</option>'
+            '<option value=\'5,asc\'>z \u2191</option>'
+            '<option value=\'5,desc\'>z \u2193</option>'
+            '</select></div>')
+    toggle_btn = '<button class="wl-toggle" onclick="var c=this.parentNode.querySelector(\'.tw\');var h=c.style.maxHeight;if(!h||h===\'0px\'){c.style.maxHeight=c.scrollHeight+1200+\'px\';this.textContent=\'Hide full table\';this.parentNode.querySelector(\'.wl-filter\').disabled=false}else{c.style.maxHeight=\'0px\';this.textContent=\'Show full table\';this.parentNode.querySelector(\'.wl-filter\').disabled=true}">Show full table</button>'
+    return (toolbar + toggle_btn + f'<div class="tw tw-collapse"><table><thead><tr><th>Ticker</th><th class="n">Last</th>'
             f'<th class="n">Day</th><th class="n">5d</th><th class="n">1M</th>'
             f'<th class="n" title="today\'s move in units of this name\'s own 20-day volatility">z</th>'
             f'<th class="n" title="today\'s volume vs its 20-day average">vol</th>'
@@ -340,9 +532,14 @@ def sec_pelosi(p):
     if not p or not p.get("ok") or not p.get("rows"):
         return unavailable("The House disclosure feeds did not return any Pelosi transactions.")
     rows = p["rows"]
+    warn = ""
+    if p.get("unparsed_filings"):
+        warn = ('<div class="stalebar">\u26a0 <strong>' + str(len(p["unparsed_filings"]))
+                + ' filing(s) could not be parsed</strong><span>Listed in the Clerk index but no '
+                  'transactions were read from the PDF, so this list may be incomplete.</span></div>')
     newk = set(p.get("new_keys") or [])
-    fresh = [r for r in rows if pkey(r) in newk]
-    old = [r for r in rows if pkey(r) not in newk]
+    fresh = [r for r in rows if _rkey(r) in newk]
+    old = [r for r in rows if _rkey(r) not in newk]
     ov = sorted({(r.get("ticker") or "").upper() for r in rows} & WATCH_TICKERS)
     head = ""
     if fresh:
@@ -357,7 +554,7 @@ def sec_pelosi(p):
              + "".join(pel_row(r) for r in old) + "</tbody></table></div></details>") if old else ""
     ovl = (f'<div class="callout"><strong>★ Watchlist overlap:</strong> {len(ov)} of your names appear in '
            f'these filings — {", ".join(esc(t) for t in ov)}.</div>') if ov else ""
-    return (ovl + head + older +
+    return (warn + ovl + head + older +
             '<p class="note">Under the STOCK Act members may file up to 30–45 days after a trade, so these '
             'disclosures <strong>lag the actual transactions by weeks</strong>. Filings marked <em>SP</em> are '
             'the spouse\'s; <em>options</em> means contracts, not shares. Amounts are broad ranges.</p>')
@@ -365,32 +562,15 @@ def sec_pelosi(p):
 def sec_trump(t):
     if not t or not t.get("ok"):
         return unavailable("No reliable public data available for a current holdings breakdown.")
-    top = t["top_holdings"][:10]
-    ov = []
-    for h in top:
-        d = h["description"].upper()
-        for tk, nm in (("NVDA", "NVIDIA"), ("AVGO", "BROADCOM"), ("GOOGL", "ALPHABET"),
-                       ("AMZN", "AMAZON"), ("IBM", "IBM"), ("LLY", "LILLY"), ("TXN", "TEXAS INSTRUMENT"),
-                       ("INTC", "INTEL"), ("MU", "MICRON"), ("UBER", "UBER")):
-            if nm in d and tk not in ov: ov.append(tk)
-    rows = "".join(
-        f'<tr><td class="tk"><span class="sym cap">{esc(nice(h["description"][:56]))}'
-        + ('<span class="badge pel">★ watchlist</span>' if any(
-            n in h["description"].upper() for n in ("NVIDIA", "BROADCOM", "ALPHABET", "AMAZON",
-                                                    "IBM", "LILLY", "TEXAS INSTRUMENT", "INTEL",
-                                                    "MICRON", "UBER")) else "")
-        + f'</span></td><td class="n mono">${h["lo"]:,} – ${h["hi"]:,}</td></tr>' for h in top)
-    ovl = (f'<div class="callout"><strong>★ Watchlist overlap:</strong> {", ".join(ov)}.</div>') if ov else ""
-    return (sec_trump_txn(t) + '<div class="callout light"><strong>Annual asset disclosure — not live trades.</strong> '
-            'OGE Form 278e reports assets in broad value ranges for the report year; it is not a record of '
-            'purchases or sales and does not reflect current market value. It changes once a year.</div>'
-            + ovl +
-            '<details class="fold"><summary>Top 10 reported holdings by value range</summary>'
-            '<div class="tw"><table><thead><tr><th>Asset</th><th class="n">Reported range</th></tr></thead>'
-            f'<tbody>{rows}</tbody></table></div>'
-            f'<p class="note">Parsed from the certified PDF: {t["line_items_parsed"]:,} asset line items, '
-            f'{t["unique_assets"]:,} distinct assets. Ranges for an asset held in several accounts are summed, '
-            f'so totals are sums of range endpoints, not valuations. {esc(t["source"])}.</p></details>')
+    prev = _load_prev()
+    same_as_before = bool(prev) and prev.get("trump_annual") == [t.get("source_url"), t.get("annual_date")]
+    txn = sec_trump_txn(t)
+    if same_as_before:
+        nxt = _next_trump_update(t.get("annual_date") or t.get("fetched_at"))
+        annual = ('<p class="quiet-note">' + chr(9654) + ' Annual disclosure (Form 278e) unchanged since '
+                  'last run ' + chr(8212) + ' <em class="muted">next update: ' + nxt + '</em></p>')
+        return txn + annual
+    return txn + _trump_full(t)
 
 def sec_trump_txn(t):
     reps = t.get("transaction_reports")
@@ -445,7 +625,79 @@ def sec_trump_txn(t):
                '<th>Type</th><th class="n">Amount</th><th class="n">Posted</th></tr></thead><tbody>'
                + "".join(trow(r) for r in big) + '</tbody></table></div></details>' if big else ""))
 
-# ------------------------------------------------------------------ page
+def _next_trump_update(fetched_at_str):
+    try:
+        dt = datetime.datetime.fromisoformat(fetched_at_str)
+        return f"May {dt.year + 1}"
+    except:
+        return "next year"
+
+def _trump_full(t):
+    top = t["top_holdings"][:10]
+    ov = []
+    for h in top:
+        d = h["description"].upper()
+        for tk, nm in (("NVDA", "NVIDIA"), ("AVGO", "BROADCOM"), ("GOOGL", "ALPHABET"),
+                       ("AMZN", "AMAZON"), ("IBM", "IBM"), ("LLY", "LILLY"), ("TXN", "TEXAS INSTRUMENT"),
+                       ("INTC", "INTEL"), ("MU", "MICRON"), ("UBER", "UBER")):
+            if nm in d and tk not in ov: ov.append(tk)
+    ovl = (f'<div class="callout"><strong>\u2605 Watchlist overlap:</strong> {", ".join(ov)}.</div>') if ov else ""
+    rows = "".join(
+        f'<tr><td class="tk"><span class="sym cap">{esc(nice(h["description"][:56]))}'
+        + ('<span class="badge pel">\u2605 watchlist</span>' if any(
+            n in h["description"].upper() for n in ("NVIDIA", "BROADCOM", "ALPHABET", "AMAZON",
+                                                    "IBM", "LILLY", "TEXAS INSTRUMENT", "INTEL",
+                                                    "MICRON", "UBER")) else "")
+        + f'</span></td><td class="n mono">${h["lo"]:,} \u2013 ${h["hi"]:,}</td></tr>' for h in top)
+    return ('<div class="callout light"><strong>Annual asset disclosure \u2014 not live trades.</strong> '
+            'OGE Form 278e reports assets in broad value ranges for the report year; it is not a record of '
+            'purchases or sales and does not reflect current market value. It changes once a year.</div>'
+            + ovl +
+            '<details class="fold" open><summary>Top 10 reported holdings by value range</summary>'
+            '<div class="tw"><table><thead><tr><th>Asset</th><th class="n">Reported range</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+            f'<p class="note">Parsed from the certified PDF: {t["line_items_parsed"]:,} asset line items, '
+            f'{t["unique_assets"]:,} distinct assets. Ranges for an asset held in several accounts are summed, '
+            f'so totals are sums of range endpoints, not valuations. {esc(t["source"])}.</p></details>')
+
+def _save_macro_snapshot(q):
+    """Append current VIX/TNX to rolling 1-year history."""
+    if not q or not q.get("macro"): return
+    macro = {m["symbol"]: m for m in q["macro"]}
+    now = datetime.datetime.now(datetime.timezone.utc)
+    history_path = os.path.join(ROOT, "data", "macro_history.json")
+    try:
+        history = json.load(open(history_path))
+    except:
+        history = []
+    entry = {"ts": now.isoformat()}
+    if "^VIX" in macro: entry["vix"] = macro["^VIX"]["last"]
+    if "^TNX" in macro: entry["tnx"] = macro["^TNX"]["last"]
+    history.append(entry)
+    cutoff = (now - datetime.timedelta(days=365)).isoformat()
+    history = [e for e in history if e.get("ts", "") >= cutoff]
+    json.dump(history, open(history_path, "w"))
+
+def _pctile_str(val, series_key):
+    """Return percentile string like '92nd pctl' for val vs rolling history."""
+    history_path = os.path.join(ROOT, "data", "macro_history.json")
+    try:
+        history = json.load(open(history_path))
+    except:
+        return None
+    vals = sorted(e[series_key] for e in history if series_key in e and e[series_key] is not None)
+    if len(vals) < 3 or val is None: return None
+    n = len(vals)
+    # percentile of val in vals (interpolated)
+    pos = sum(1 for v in vals if v < val) + 0.5 * sum(1 for v in vals if v == val)
+    p = pos / n * 100
+    if p >= 99: suffix = "st"
+    elif p >= 90: suffix = "th"
+    elif p >= 80: suffix = "th"
+    else: suffix = "th"
+    return f"{p:.0f}{suffix}"
+
+SORT_JS = "<script>\n(function(){\n  var tables = document.querySelectorAll('.tw table');\n  [].forEach.call(tables, function(tb) {\n    var headers = tb.querySelectorAll('th');\n    var body = tb.tBodies[0];\n    if (!body || !headers.length) return;\n    [].forEach.call(headers, function(th, i) {\n      var label = th.textContent.trim().toLowerCase();\n      if (!label.match(/^(ticker|last|day|5d|1m|z|vol)$/i)) return;\n      th.style.cursor = 'pointer';\n      th.title = 'Sort by ' + label;\n      th.addEventListener('click', function() {\n        var dir = this._d = (this._d === 'asc') ? 'desc' : 'asc';\n        var rows = [].slice.call(body.rows);\n        rows.sort(function(a, c) {\n          var va = parseCell((a.cells[i] || a).textContent),\n              vc = parseCell((c.cells[i] || c).textContent);\n          if (typeof va === 'number' && typeof vc === 'number') return dir === 'asc' ? va - vc : vc - va;\n          va = String(va); vc = String(vc);\n          return dir === 'asc' ? va.localeCompare(vc) : vc.localeCompare(va);\n        });\n        var frag = document.createDocumentFragment();\n        rows.forEach(function(r) { frag.appendChild(r); });\n        body.appendChild(frag);\n        [].forEach.call(headers, function(x) { x.classList.remove('sort-asc', 'sort-desc'); });\n        this.classList.add(dir === 'asc' ? 'sort-asc' : 'sort-desc');\n      });\n    });\n  });\n  function parseCell(s) {\n    s = (s || '').trim();\n    if (!s) return '';\n    var num = function(x) { return parseFloat(x.replace(/[^0-9.\\-]/g, '')) || 0; };\n    if (s.charAt(0) === '$') return num(s);                       // price\n    if (s.indexOf('\\u03c3') > 0) return num(s);                   // z-score\n    if (s.indexOf('\\u00d7') > 0) return num(s);                   // volume ratio\n    if (s.indexOf('%') > 0) return num(s);                        // percentage\n    return s.toLowerCase();                                       // ticker / text\n  }\n})();\n</script>"# ------------------------------------------------------------------ page
 def main():
     q, p, tr = load("quotes.json"), load("pelosi.json"), load("trump.json")
     now = datetime.datetime.now(TZ)
@@ -519,9 +771,9 @@ font-weight:700;padding:9px 18px;background:#fafbfc;border-bottom:1px solid var(
 td{{padding:9px 18px;border-bottom:1px solid #f2f4f6;vertical-align:middle}}
 tr:last-child td{{border-bottom:none}}
 td.n,th.n{{text-align:right;white-space:nowrap}} .nowrap{{white-space:nowrap}}
-tr.calm td{{opacity:.5}} tr.calm:hover td{{opacity:1}}
-tr.pop td{{background:#fffdf5;font-weight:600}}
-tr.pop td:first-child{{box-shadow:inset 3px 0 0 #e0b445}}
+tr.calm td{{opacity:.4;font-size:13px}} tr.calm:hover td{{opacity:1}}
+tr.pop td{{background:#fffdf5;font-weight:700}}
+tr.pop td:first-child{{box-shadow:inset 4px 0 0 #e0b445}}
 .tk .sym{{display:block;font-weight:650}} .tk .sym.cap{{font-weight:600}}
 .tk .sub{{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}}
 .mono{{font-variant-numeric:tabular-nums}}
@@ -542,6 +794,24 @@ vertical-align:1px}}
 .badge.hi{{background:var(--upbg);color:var(--up)}} .badge.lo{{background:var(--downbg);color:var(--down)}}
 .badge.pel{{background:#f2ecfd;color:var(--star)}} .badge.warn{{background:#fff2d6;color:#8a5a00}}
 .badge.new{{background:var(--star);color:#fff}}
+.badge.trend-up{{background:#e8f5f0;color:#0a7d5a}}
+.badge.trend-dn{{background:#fceceb;color:#b3261e}}
+.badge.stretch{{background:#fff2d6;color:#8a5a00;border:1px solid #efd9ab}}
+.setups{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}}
+.set-chip{{display:inline-flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12.5px}}
+.set-chip b{{font-weight:700;margin-right:2px}}
+.set-dot{{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}}
+.set-force{{border-left:3px solid var(--up)}}
+.set-press{{border-left:3px solid var(--down)}}
+.set-str{{border-left:3px solid #c98a00}}
+.set-hi{{border-left:3px solid var(--up)}}
+.set-lo{{border-left:3px solid var(--down)}}
+.wl-toolbar{{display:flex;gap:8px;padding:10px 18px;border-bottom:1px solid var(--line);background:#fafbfc}}
+.wl-toolbar select{{padding:4px 8px;border:1px solid var(--line);border-radius:6px;font:13px -apple-system,sans-serif;color:var(--ink);background:#fff;cursor:pointer}}
+.wl-toolbar select:focus{{outline:none;border-color:var(--accent)}}
+.wl-mobile-sort{{display:none}}
+@media(max-width:640px){{.wl-mobile-sort{{display:block}}.wl-filter{{flex:1}}.sched-h{{font-size:11px}}}}
+.delta-strip{{background:#f0f2f5;border-radius:8px;padding:10px 14px;margin:10px 0 14px;font-size:13.5px}}.delta-strip h3{{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}}.delta-strip ul{{list-style:none;margin:0;padding:0}}.delta-strip li{{display:flex;gap:6px;align-items:baseline;padding:2px 0}}.delta-strip .bl{{white-space:nowrap;color:var(--mut);font-size:12px;flex-shrink:0}}.delta-strip .bd{{color:var(--ink)}}.delta-quiet{{background:#f0f2f5;border-radius:8px;padding:8px 14px;margin:10px 0 14px;font-size:13px;color:var(--mut);text-align:center}}.tw-collapse{{max-height:0;overflow:hidden;transition:max-height .35s ease}}.wl-toggle{{display:block;width:100%;padding:6px;margin:2px 0 0;background:none;border:1px dashed var(--line);border-radius:6px;font:12.5px -apple-system,sans-serif;color:var(--mut);cursor:pointer;transition:background .15s}}.wl-toggle:hover{{background:#f0f2f5;color:var(--ink)}}
 .badge.unu{{background:#fdf0d9;color:#8a5a00;border:1px solid #efd9ab}}
 .zs{{font-variant-numeric:tabular-nums;font-weight:650;font-size:13px}}
 .zs.unu{{color:#8a5a00}} .zs.faint{{color:var(--mut);font-weight:500;opacity:.75}}
@@ -575,34 +845,83 @@ background:repeating-linear-gradient(45deg,#fbfcfd,#fbfcfd 10px,#f7f8fa 10px,#f7
 .unavail strong{{color:#8a5a00}}
 .legend{{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin:0 0 16px}}
 footer{{text-align:center;color:var(--mut);font-size:12px;padding:6px 0 0;line-height:1.7}}
-@media(max-width:700px){{th,td{{padding-left:13px;padding-right:13px}}.bl{{min-width:100%}}}}
+.regime-bar{{display:flex;align-items:center;gap:8px;padding:6px 0 4px;font-size:14px;border-bottom:1px solid var(--line);margin-bottom:6px}}
+.regime-bar strong{{font-weight:700;text-transform:capitalize}}
+.regime-bar .regime-why{{color:var(--mut);font-size:12.5px}}
+.regime-dot{{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}}
+.quiet-hero{{padding:6px 0;font-size:13px;color:var(--mut);font-style:italic}}
+.rbl em{{font-style:normal;opacity:.65}}
+.sort-asc:after{{content:" \u25b2";font-size:9px;margin-left:2px}}
+.sort-desc:after{{content:" \u25bc";font-size:9px;margin-left:2px}}
+@media(max-width:780px){{th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5){{display:none}}
+th,td{{padding-left:10px;padding-right:8px;font-size:13px}}
+.bl{{min-width:100%;font-size:13px}}
+.hero-h{{font-size:11px}}
+.bullets li{{font-size:13px;padding:7px 0 7px 14px}}
+.macro{{gap:5px}}
+.chip{{padding:5px 9px;font-size:12px}}
+.rbc{{width:80px}}
+.spkc{{width:72px;padding-right:4px}}
+.spk{{width:72px!important;height:18px!important}}}}
+@media(max-width:500px){{.wrap{{padding:0 12px}}
+.chip .cv{{font-size:13px}}
+td{{padding:7px 6px;font-size:12px}}
+.rbc{{width:60px}}
+.mini{{font-size:10px}}}}
+@media(max-width:640px){{
+section .tw table,.tw thead,.tw tbody,.tw th,.tw td,.tw tr{{display:block}}
+.tw thead{{display:none!important}}
+.tw tr{{margin-bottom:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card);box-shadow:0 1px 2px rgba(15,20,25,.04)}}
+.tw td{{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border:none;font-size:13px;text-align:left!important}}
+.tw td:before{{content:attr(data-label);font-weight:600;color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;margin-right:8px}}
+.tw td.n{{justify-content:space-between}}
+.tk .sub{{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}}
+.tk .sym{{white-space:nowrap}}
+.spk{{width:62px!important;height:16px!important}}
+.rbc{{width:auto!important;flex:1;min-width:0;padding:4px 0!important;flex-direction:column;align-items:stretch!important}}
+.rb{{min-width:0;width:100%}}
+.rbl{{font-size:10.5px}}
+.mini{{font-size:10px}}}}
 </style></head><body>
 <header class="top"><div class="wrap">
 <h1>Market Monitor</h1>
 <div class="updated"><span class="dot"></span>Last updated: {esc(stamp)}</div>
 <div class="sub-h">{esc(mkt)}</div>
+<div class="sched-h">▶ Auto-refresh: Mon · Wed · Fri — 22:30 {now.strftime("%Z")}</div>
 {macro_strip(q)}
 </div></header>
 <main><div class="wrap">
-{build_today(q, p, tr)}
+{build_today(q, p, q.get("macro", {}))}
+{build_setups(q)}
+{build_setups(q)}
+{build_delta(q, p, _load_prev(), tr)}
 <div class="legend"><span class="up">▲ + up</span><span class="down">▼ − down</span>
 <span>▬ flat</span><span>★ = on your watchlist</span>
 <span>Arrows and +/− carry the same meaning as the colours.</span></div>
 
-<section><div class="hd"><h2><span class="n">1</span>Indices</h2>{src(bool(q and q.get('indices')),'Yahoo Finance')}</div>
-{stale_banner("quotes","market")}{sec_indices(q)}</section>
-
-<section><div class="hd"><h2><span class="n">2</span>Watchlist</h2>{src(bool(q and q.get('watchlist')),'Yahoo Finance')}</div>
+<section><div class="hd"><h2><span class="n">1</span>Watchlist</h2>{src(bool(q and q.get('watchlist')),'Yahoo Finance')}</div>
 {stale_banner("quotes","market")}{sec_watch(q, p)}</section>
 
-<section><div class="hd"><h2><span class="n">3</span>Congress trading — Nancy Pelosi</h2>{src(bool(p and p.get('ok')),'House Clerk PTR filings')}</div>
+<section><div class="hd"><h2><span class="n">2</span>Congress trading — Nancy Pelosi</h2>{src(bool(p and p.get('ok')),'House Clerk PTR filings')}</div>
 {stale_banner("pelosi","House disclosure")}{sec_pelosi(p)}</section>
 
-<section><div class="hd"><h2><span class="n">4</span>Trump — OGE disclosures</h2>{src(bool(tr and tr.get('ok')),'OGE 278e + 278-T')}</div>
+<section><div class="hd"><h2><span class="n">3</span>Trump — annual disclosure</h2>{src(bool(tr and tr.get('ok')),'OGE Form 278e')}</div>
 {stale_banner("trump","OGE 278e")}{sec_trump(tr)}</section>
 
-<footer>{esc(runline)}<br>Informational only — not investment advice.</footer>
+<footer>{esc(runline)}<br>Informational only — not investment advice.
+
+<h2><span class="n">4</span>Indices</h2>{src(bool(q and q.get('indices')),'Yahoo Finance')}</div>
+{stale_banner("quotes","market")}{sec_indices(q)}</section>
+
+<section><div class="hd">
+
+</footer>
+{SORT_JS}
 </div></main></body></html>"""
+    try:
+        save_prev_state(q, p, tr)
+    except Exception as e:
+        print(f"prev_state save failed: {e}", file=sys.stderr)
     os.makedirs(os.path.dirname(OUT_HTML), exist_ok=True)
     open(OUT_HTML, "w").write(page)
     print("wrote", OUT_HTML, len(page), "bytes")
