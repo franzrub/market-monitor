@@ -97,9 +97,10 @@ Retry `publish` once the deployment runtime is enabled; the app dir is ready as-
 - `refresh.py`: cache promotion now copies sub-directories (`data/cache/278t/`).
 
 ## GitHub (2026-09-26)
-- Source lives on branch `main` of `franzrub/market-monitor`; the page is served by Pages
-  from `gh-pages`. Workflow `.github/workflows/refresh.yml`: Mon/Wed/Fri 20:30 UTC + manual.
-  It commits `data/*.json` and `app/index.html` back to `main`, and publishes to `gh-pages`
-  **only** when the repo variable `DEPLOY_PAGES=true` (or "deploy" ticked on a manual run).
-- Scheduled workflows run only from the default branch (currently `gh-pages`).
+- Source mirror on branch `main` of `franzrub/market-monitor`. The live page on `gh-pages` is
+  refreshed automatically by a SEPARATE job (not this folder) — the owner wants it left as is.
+  Nothing here publishes to `gh-pages`.
+- `.github/workflows/refresh.yml` is a manual-only test harness (no schedule, no deploy). It can
+  only be triggered if `main` becomes the default branch, which was deliberately NOT done.
+- The fixes above reach the live site only when they are ported into the job that builds it.
 - Locally: `pypdf` is not in the system python; use a venv (`pip install -r requirements.txt`).

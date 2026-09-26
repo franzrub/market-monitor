@@ -1,16 +1,10 @@
 name: refresh
 
-# Mon/Wed/Fri 20:30 UTC = 22:30 CEST (21:30 CET in winter).
-# Scheduled runs only fire from the repository's DEFAULT branch.
+# Manual test harness only. The live site (gh-pages) is refreshed by a separate job and
+# must NOT be touched from here: no schedule, no publish step.
+# Note: workflow_dispatch works only once this file is on the repository's default branch.
 on:
-  schedule:
-    - cron: "30 20 * * 1,3,5"
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: "Publish app/index.html to gh-pages"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -55,19 +49,3 @@ jobs:
           git add data/*.json app/index.html
           git diff --cached --quiet || git commit -m "refresh $(date -u +%Y-%m-%dT%H:%MZ)"
           git push origin main
-
-      # Publishing is opt-in: set the repository variable DEPLOY_PAGES=true
-      # (Settings → Secrets and variables → Actions → Variables), or tick "deploy"
-      # on a manual run.
-      - name: Publish to gh-pages
-        if: ${{ inputs.deploy || vars.DEPLOY_PAGES == 'true' }}
-        run: |
-          d=$(mktemp -d)
-          cp app/index.html "$d/index.html"
-          cd "$d"
-          git init -q -b gh-pages
-          git config user.name "market-monitor-bot"
-          git config user.email "market-monitor-bot@users.noreply.github.com"
-          git add index.html
-          git commit -q -m "deploy index.html"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
