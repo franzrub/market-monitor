@@ -1,23 +1,23 @@
 {
- "run_at": "2026-10-03T01:55:01.967552+02:00",
- "run_at_human": "2026-10-03 01:55 CEST",
+ "run_at": "2026-10-06T03:21:54.292931+02:00",
+ "run_at_human": "2026-10-06 03:21 CEST",
  "sources": {
   "quotes": {
    "ok": true,
    "detail": "ok",
-   "age_hours": 0.006852449444444445,
+   "age_hours": 0.005887256111111111,
    "stale": false
   },
   "pelosi": {
    "ok": true,
    "detail": "ok",
-   "age_hours": 9.663027777777778e-05,
+   "age_hours": 0.00011140472222222222,
    "stale": false
   },
   "trump": {
    "ok": true,
    "detail": "ok",
-   "age_hours": 0.00019057833333333332,
+   "age_hours": 0.0001579486111111111,
    "stale": false
   }
  },
