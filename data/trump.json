@@ -2,12 +2,12 @@
  "source": "U.S. Office of Government Ethics \u2014 OGE Form 278e (Annual (2026), report year 2025; posted by OGE 2026-07-01)",
  "source_url": "https://extapps2.oge.gov/201/Presiden.nsf/PAS+Index/69AEAA9D7455ACD585258E27002DDEE1/$FILE/Donald-J-Trump-2026-278ANNUAL.pdf",
  "annual_date": "2026-07-01",
- "discovery_error": "OSError: OGE index API unusable: malformed index (1595 bytes): JSONDecodeError",
+ "discovery_error": "OSError: OGE index API unusable: curl exit 28: connect to server\ncurl: (28) Failed to connect to extapps2.oge.gov port 443 after 133165 ms: Couldn't connect to server\n",
  "transaction_reports": [],
  "filer": "Donald J. Trump, President of the United States",
  "report_type": "ANNUAL ASSET DISCLOSURE \u2014 value ranges only, not live trades",
- "line_items_parsed": 6100,
- "unique_assets": 3987,
+ "line_items_parsed": 6104,
+ "unique_assets": 3991,
  "top_holdings": [
   {
    "description": "U.S. BROKERAGE ACCOUNT MONEY MARKET ACCOUNT (CASH) #12",
@@ -17,6 +17,18 @@
   },
   {
    "description": "U.S. BROKERAGE ACCOUNT MONEY MARKET ACCOUNT (CASH) #13",
+   "lo": 50000000,
+   "hi": 100000000,
+   "lots": 1
+  },
+  {
+   "description": "Avenue of the Americas, a Tenancy-in Common Underlying Assets: commercial real estateLocation: New York, NY",
+   "lo": 50000000,
+   "hi": 100000000,
+   "lots": 1
+  },
+  {
+   "description": "Wall Street LLC Underlying Assets: Commercial real estateLocation: New York, NY",
    "lo": 50000000,
    "hi": 100000000,
    "lots": 1
@@ -146,21 +158,9 @@
    "lo": 5000001,
    "hi": 25000000,
    "lots": 1
-  },
-  {
-   "description": "U.S. BROKERAGE ACCOUNT MONEY MARKET ACCOUNT (CASH) #11",
-   "lo": 5000001,
-   "hi": 25000000,
-   "lots": 1
-  },
-  {
-   "description": "U.S. BROKERAGE ACCOUNT MONEY MARKET ACCOUNT (CASH) #16",
-   "lo": 5000001,
-   "hi": 25000000,
-   "lots": 1
   }
  ],
- "fetched_at": "2026-10-08T00:18:59.101278+00:00",
+ "fetched_at": "2026-10-10T00:31:45.371347+00:00",
  "ok": true,
  "new_reports": []
 }
