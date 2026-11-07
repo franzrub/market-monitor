@@ -22,13 +22,13 @@
    "lots": 1
   },
   {
-   "description": "Avenue of the Americas, a Tenancy-in Common Underlying Assets: commercial real estateLocation: New York, NY",
+   "description": "Avenue of the Americas, a Tenancy-in Common Underlying Assets: commercial real estate Location: New York, NY",
    "lo": 50000000,
    "hi": 100000000,
    "lots": 1
   },
   {
-   "description": "Wall Street LLC Underlying Assets: Commercial real estateLocation: New York, NY",
+   "description": "Wall Street LLC Underlying Assets: Commercial real estate Location: New York, NY",
    "lo": 50000000,
    "hi": 100000000,
    "lots": 1
@@ -160,7 +160,7 @@
    "lots": 1
   }
  ],
- "fetched_at": "2026-11-05T00:58:41.325593+00:00",
+ "fetched_at": "2026-11-07T00:12:20.573446+00:00",
  "ok": true,
  "new_reports": []
 }
