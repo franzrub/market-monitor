@@ -5,6 +5,17 @@
  "primary_source_note": "house-stock-watcher unavailable (HTTP Error 403: Forbidden)",
  "rows": [
   {
+   "date": "10/07/2026",
+   "disclosed": "11/6/2026",
+   "ticker": "WBD",
+   "asset": "Warner Bros. Discovery, Inc. - Series A Common Stock",
+   "class": "ST",
+   "class_label": "stock",
+   "type": "SELL",
+   "amount": "$50,001 - $100,000",
+   "doc": "https://disclosures-clerk.house.gov/public_disc/ptr-pdfs/2026/20035780.pdf"
+  },
+  {
    "date": "09/08/2026",
    "disclosed": "10/2/2026",
    "ticker": "",
@@ -456,6 +467,11 @@
    "rows": 1
   },
   {
+   "doc": "20035780",
+   "filed": "11/6/2026",
+   "rows": 1
+  },
+  {
    "doc": "20026590",
    "filed": "1/17/2025",
    "rows": 9
@@ -472,6 +488,8 @@
   }
  ],
  "unparsed_filings": [],
- "fetched_at": "2026-11-07T00:12:06.312036+00:00",
- "new_keys": []
+ "fetched_at": "2026-11-10T02:50:20.377595+00:00",
+ "new_keys": [
+  "10/07/2026|WBD|SELL|$50,001 - $100,000"
+ ]
 }
