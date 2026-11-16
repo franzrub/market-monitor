@@ -40,7 +40,7 @@ def nice(s): return " ".join(ACR.get(w, w) for w in s.title().split())
 
 def fmt(v, cur="", idx=False):
     if v is None: return "n/a"
-    sym = {"USD": "$", "EUR": "€"}.get(cur, "")
+    sym = {"USD": "$", "EUR": "€", "CNY": "¥"}.get(cur, "")
     if idx: return f"{sym}{v:,.0f}"
     return f"{sym}{v:,.2f}" if abs(v) < 10000 else f"{sym}{v:,.0f}"
 

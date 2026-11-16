@@ -30,7 +30,11 @@ WATCH = [("BRK-B", "Berkshire Hathaway Inc. Class B", "BRK.B"), ("GOOGL", "Alpha
          ("TXN", "Texas Instruments Incorporated", None), ("INTC", "Intel Corporation", None),
          ("MU", "Micron Technology, Inc.", None), ("USAR", "USA Rare Earth, Inc.", None),
          ("UBER", "Uber Technologies, Inc.", None), ("IBM", "International Business Machines", None),
-         ("SNDK", "SanDisk Corp.", None)]
+         ("SNDK", "SanDisk Corp.", None),
+         # China A-share rare earths (state-owned stakes); quote in CNY. Not in build.py
+         # WATCH_TICKERS/WATCH_NAMES on purpose: no US-filing (Pelosi/OGE) matching.
+         ("600111.SS", "China Northern Rare Earth (Group) High-Tech", None),
+         ("000831.SZ", "China Rare Earth Resources And Technology", None)]
 
 def yahoo(symbol):
     last_err = None
